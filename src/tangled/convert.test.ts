@@ -211,6 +211,101 @@ describe('toTangled', () => {
       expect(result).toMatchObject({ dependencies: { nixpkgs: ['nodejs'] } });
     });
 
+    it('converts actions/checkout with no inputs to no clone config', () => {
+      const result = toTangled(
+        workflow({
+          jobs: { build: { steps: [{ uses: 'actions/checkout@v4' }] } },
+        }),
+      );
+
+      expect(result.clone).toBeUndefined();
+      expect(result.steps).toBeUndefined();
+    });
+
+    it('maps checkout fetch-depth, submodules and fetch-tags to clone', () => {
+      const result = toTangled(
+        workflow({
+          jobs: {
+            build: {
+              steps: [
+                {
+                  uses: 'actions/checkout@v4',
+                  with: {
+                    'fetch-depth': 0,
+                    submodules: true,
+                    'fetch-tags': false,
+                  },
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(result.clone).toEqual({
+        depth: 0,
+        submodules: true,
+        tags: false,
+      });
+    });
+
+    it('reads string-form checkout inputs', () => {
+      const result = toTangled(
+        workflow({
+          jobs: {
+            build: {
+              steps: [
+                {
+                  uses: 'actions/checkout@v4',
+                  with: { 'fetch-depth': '1', submodules: 'false' },
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(result.clone).toEqual({ depth: 1, submodules: false });
+    });
+
+    it('treats recursive submodules as a submodule clone', () => {
+      const result = toTangled(
+        workflow({
+          jobs: {
+            build: {
+              steps: [
+                {
+                  uses: 'actions/checkout@v4',
+                  with: { submodules: 'recursive' },
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(result.clone).toEqual({ submodules: true });
+    });
+
+    it('ignores unparseable checkout inputs', () => {
+      const result = toTangled(
+        workflow({
+          jobs: {
+            build: {
+              steps: [
+                {
+                  uses: 'actions/checkout@v4',
+                  with: { 'fetch-depth': 'shallow' },
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(result.clone).toBeUndefined();
+    });
+
     it('throws on an unknown action', () => {
       expect(() =>
         toTangled(

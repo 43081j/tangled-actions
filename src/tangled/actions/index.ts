@@ -1,6 +1,7 @@
 import type { ActionConversion, ActionConverter } from './types.js';
 import type { Step as GitHubStep } from '../../github/types.js';
 import { convertSetupNode } from './setup-node.js';
+import { convertCheckout } from './checkout.js';
 
 export type { ActionConversion, ActionConverter } from './types.js';
 
@@ -9,6 +10,7 @@ export type { ActionConversion, ActionConverter } from './types.js';
  */
 const ACTION_CONVERTERS: Record<string, ActionConverter> = {
   'actions/setup-node': convertSetupNode,
+  'actions/checkout': convertCheckout,
 };
 
 /**
