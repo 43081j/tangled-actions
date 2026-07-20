@@ -4,7 +4,7 @@ import {compileFromFile} from 'json-schema-to-typescript';
 
 const SCHEMA_URL = 'https://www.schemastore.org/github-workflow.json';
 const TEMP_SCHEMA_PATH = join(process.cwd(), 'github-workflow.json');
-const OUTPUT_PATH = join(process.cwd(), 'src', 'github-types.ts');
+const OUTPUT_PATH = join(process.cwd(), 'src', 'github/types.ts');
 
 async function main(): Promise<void> {
   console.log(`Fetching schema from ${SCHEMA_URL}...`);

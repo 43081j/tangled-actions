@@ -1,4 +1,4 @@
-import { convert } from './main.js';
+import { toTangled, toGitHub } from './main.js';
 
 console.log('Converting...');
-convert();
+console.log(toTangled, toGitHub);
