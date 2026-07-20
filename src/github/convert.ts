@@ -1,11 +1,14 @@
+import { basename } from 'node:path';
 import type {
   Workflow,
   WorkflowConstraint,
   WorkflowEvent,
+  WorkflowStep,
 } from '../tangled/types.js';
 import type {
   HttpsJsonSchemastoreOrgGithubWorkflowJson as GitHubWorkflow,
   Event as GitHubEvent,
+  Step as GitHubStep,
 } from './types.js';
 
 /**
@@ -81,6 +84,73 @@ function toEnv(
 }
 
 /**
+ * Job id used when no workflow path is provided, or a path yields no valid id.
+ */
+const DEFAULT_JOB_ID = 'build';
+
+/**
+ * The runner used for the generated job. Tangled selects its environment via
+ * the engine rather than a runner label, so a GitHub default is used.
+ */
+const RUNNER = 'ubuntu-latest';
+
+/**
+ * Derive a GitHub job id from a tangled workflow's file path.
+ */
+function toJobId(path: string | undefined): string {
+  if (!path) {
+    return DEFAULT_JOB_ID;
+  }
+
+  const name = basename(path).replace(/\.ya?ml$/i, '');
+
+  let id = name.replace(/[^A-Za-z0-9_-]/g, '-');
+  if (!/^[A-Za-z_]/.test(id)) {
+    id = `_${id}`;
+  }
+
+  return /[A-Za-z0-9]/.test(id) ? id : DEFAULT_JOB_ID;
+}
+
+/**
+ * Translate a single tangled step into a GitHub step.
+ */
+function toStep(step: WorkflowStep): GitHubStep {
+  const result: GitHubStep = { run: step.command };
+
+  if (step.name) {
+    result.name = step.name;
+  }
+
+  if (step.environment) {
+    result.env = { ...step.environment };
+  }
+
+  return result;
+}
+
+/**
+ * Translate a tangled workflow's `steps` into a GitHub `jobs` map. All steps
+ * run in a single job, whose id is derived from `path`. An empty or omitted
+ * `steps` yields an empty map.
+ */
+function toJobs(
+  steps: WorkflowStep[] | undefined,
+  path: string | undefined,
+): GitHubWorkflow['jobs'] {
+  if (!steps || steps.length === 0) {
+    return {};
+  }
+
+  return {
+    [toJobId(path)]: {
+      'runs-on': RUNNER,
+      steps: steps.map(toStep) as [GitHubStep, ...GitHubStep[]],
+    },
+  };
+}
+
+/**
  * Convert the engine-agnostic fields of a tangled workflow into a GitHub
  * workflow base. Steps and jobs are handled elsewhere.
  */
@@ -101,11 +171,11 @@ function toGitHubBase(
 }
 
 /**
- * Convert a tangled workflow into an equivalent GitHub Actions workflow
+ * Convert a tangled workflow into an equivalent GitHub Actions workflow.
  */
-export function toGitHub(workflow: Workflow): GitHubWorkflow {
+export function toGitHub(workflow: Workflow, path?: string): GitHubWorkflow {
   return {
-    jobs: {},
+    jobs: toJobs(workflow.steps, path),
     ...toGitHubBase(workflow),
   };
 }
