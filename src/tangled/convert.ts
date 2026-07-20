@@ -3,11 +3,45 @@ import type {
   WorkflowBase,
   WorkflowConstraint,
   WorkflowEvent,
+  WorkflowStep,
 } from './types.js';
 import type {
   HttpsJsonSchemastoreOrgGithubWorkflowJson as GitHubWorkflow,
   Event as GitHubEvent,
+  NormalJob,
+  Step as GitHubStep,
 } from '../github/types.js';
+
+/**
+ * Workflow-level keys with a tangled representation.
+ */
+const WORKFLOW_KEYS = new Set<keyof GitHubWorkflow>(['on', 'env', 'jobs']);
+
+/**
+ * GitHub job keys with a tangled representation.
+ */
+const JOB_KEYS = new Set<keyof NormalJob>(['runs-on', 'steps']);
+
+/**
+ * GitHub step keys with a tangled representation.
+ */
+const STEP_KEYS = new Set<keyof GitHubStep>(['run', 'name', 'env']);
+
+/**
+ * Throw if `value` has any key not listed in `known`. `context` labels the
+ * offending location in the error message.
+ */
+function assertKnownKeys<T extends object>(
+  value: T,
+  known: Set<keyof T>,
+  context: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (!known.has(key as keyof T)) {
+      throw new Error(`Unsupported ${context} key: ${key}`);
+    }
+  }
+}
 
 /**
  * GitHub event names that have a tangled equivalent, mapped to it. Events
@@ -72,9 +106,7 @@ function toWhen(on: GitHubWorkflow['on']): WorkflowConstraint[] {
 }
 
 /**
- * Translate GitHub workflow-level `env` into tangled `environment`. A string
- * expression (`${{ ... }}`) cannot be represented as a static map and is
- * dropped.
+ * Translate a GitHub `env` map into tangled `environment`.
  */
 function toEnvironment(
   env: GitHubWorkflow['env'],
@@ -91,12 +123,58 @@ function toEnvironment(
 }
 
 /**
- * Convert the engine-agnostic fields of a GitHub Actions workflow into a
- * tangled workflow base. Steps and engine-specific configuration are handled
- * elsewhere.
+ * Translate a single GitHub step into a tangled step.
  */
-function toTangledBase(workflow: GitHubWorkflow): Omit<WorkflowBase, 'steps'> {
-  const base: Omit<WorkflowBase, 'steps'> = {};
+function toStep(step: GitHubStep): WorkflowStep {
+  assertKnownKeys(step, STEP_KEYS, 'step');
+
+  if (typeof step.run !== 'string') {
+    throw new Error('Unsupported step: a `run` command is required');
+  }
+
+  const result: WorkflowStep = { command: step.run };
+
+  if (step.name !== undefined) {
+    result.name = step.name;
+  }
+
+  const environment = toEnvironment(step.env);
+  if (environment) {
+    result.environment = environment;
+  }
+
+  return result;
+}
+
+/**
+ * Translate a GitHub `jobs` map into a flat list of tangled steps.
+ */
+function toSteps(jobs: GitHubWorkflow['jobs']): WorkflowStep[] {
+  const steps: WorkflowStep[] = [];
+
+  for (const [id, job] of Object.entries(jobs)) {
+    if ('uses' in job) {
+      throw new Error(
+        `Unsupported job "${id}": reusable workflow calls have no tangled equivalent`,
+      );
+    }
+
+    assertKnownKeys(job, JOB_KEYS, `job "${id}"`);
+
+    for (const step of job.steps ?? []) {
+      steps.push(toStep(step));
+    }
+  }
+
+  return steps;
+}
+
+/**
+ * Convert the engine-agnostic fields of a GitHub Actions workflow into a
+ * tangled workflow base. Engine-specific configuration is handled elsewhere.
+ */
+function toTangledBase(workflow: GitHubWorkflow): WorkflowBase {
+  const base: WorkflowBase = {};
 
   const when = toWhen(workflow.on);
   if (when.length > 0) {
@@ -108,13 +186,22 @@ function toTangledBase(workflow: GitHubWorkflow): Omit<WorkflowBase, 'steps'> {
     base.environment = environment;
   }
 
+  const steps = toSteps(workflow.jobs);
+  if (steps.length > 0) {
+    base.steps = steps;
+  }
+
   return base;
 }
 
 /**
- * Convert a GitHub Actions workflow into an equivalent tangled workflow
+ * Convert a GitHub Actions workflow into an equivalent tangled workflow. Throws
+ * on any workflow, job, or step configuration that has no tangled
+ * representation, rather than silently dropping it.
  */
 export function toTangled(workflow: GitHubWorkflow): Workflow {
+  assertKnownKeys(workflow, WORKFLOW_KEYS, 'workflow');
+
   const base = toTangledBase(workflow);
 
   return {
