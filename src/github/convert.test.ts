@@ -18,6 +18,10 @@ function nixery(overrides: Partial<Workflow> = {}): Workflow {
   return { engine: 'nixery', ...overrides } as Workflow;
 }
 
+function microvm(overrides: Partial<Workflow> = {}): Workflow {
+  return { engine: 'microvm', ...overrides } as Workflow;
+}
+
 describe('convertWorkflow', () => {
   it('produces an empty jobs map and no triggers by default', () => {
     expect(convertWorkflow(nixery())).toEqual({ jobs: {}, on: {} });
@@ -215,6 +219,73 @@ describe('convertWorkflow', () => {
       const step = (result.jobs.build as NormalJob).steps![0];
 
       expect(step.env).not.toBe(environment);
+    });
+  });
+
+  describe('dependencies', () => {
+    it('prepends a setup step for a nixery nixpkgs package', () => {
+      const result = convertWorkflow(
+        nixery({
+          dependencies: { nixpkgs: ['nodejs_20'] },
+          steps: [{ command: 'npm test' }],
+        }),
+      );
+
+      expect((result.jobs.build as NormalJob).steps).toEqual([
+        { uses: 'actions/setup-node@v4', with: { 'node-version': '20' } },
+        { run: 'npm test' },
+      ]);
+    });
+
+    it('omits the node version for the unversioned nodejs package', () => {
+      const result = convertWorkflow(
+        nixery({ dependencies: { nixpkgs: ['nodejs'] } }),
+      );
+
+      expect((result.jobs.build as NormalJob).steps).toEqual([
+        { uses: 'actions/setup-node@v4' },
+      ]);
+    });
+
+    it('resolves a microvm package list against nixpkgs', () => {
+      const result = convertWorkflow(
+        microvm({ dependencies: ['nodejs_20'], steps: [{ command: 'make' }] }),
+      );
+
+      expect((result.jobs.build as NormalJob).steps).toEqual([
+        { uses: 'actions/setup-node@v4', with: { 'node-version': '20' } },
+        { run: 'make' },
+      ]);
+    });
+
+    it('throws on a package with no GitHub equivalent', () => {
+      expect(() =>
+        convertWorkflow(nixery({ dependencies: { nixpkgs: ['ripgrep'] } })),
+      ).toThrow('Unsupported dependency: nixpkgs package "ripgrep"');
+    });
+
+    it('throws on a nodejs package from another registry', () => {
+      expect(() =>
+        convertWorkflow(nixery({ dependencies: { custom: ['nodejs_20'] } })),
+      ).toThrow('Unsupported dependency: custom package "nodejs_20"');
+    });
+  });
+
+  describe('unsupported input', () => {
+    it('throws on an unknown workflow key rather than dropping it', () => {
+      expect(() => convertWorkflow(microvm({ image: 'debian' }))).toThrow(
+        'Unsupported workflow key: image',
+      );
+    });
+
+    it('throws on an unknown step key rather than dropping it', () => {
+      expect(() =>
+        convertWorkflow(
+          nixery({
+            steps: [{ command: 'make', shell: 'bash' } as never],
+          }),
+        ),
+      ).toThrow('Unsupported step key: shell');
     });
   });
 

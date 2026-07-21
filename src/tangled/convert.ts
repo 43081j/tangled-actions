@@ -14,7 +14,7 @@ import type {
   Permissions,
   Step as GitHubStep,
 } from '../github/types.js';
-import { convertAction } from './actions/index.js';
+import { convertAction } from './actions/convert.js';
 import { groupJobsByNeeds, type JobGroup } from './graph.js';
 
 /**

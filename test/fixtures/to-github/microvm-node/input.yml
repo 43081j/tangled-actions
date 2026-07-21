@@ -1,0 +1,10 @@
+engine: microvm
+when:
+  - event: push
+dependencies:
+  - nodejs_20
+steps:
+  - command: npm ci --ignore-scripts
+    name: Install Dependencies
+  - command: npm test
+    name: Test

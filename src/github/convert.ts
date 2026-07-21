@@ -11,6 +11,46 @@ import type {
   Event as GitHubEvent,
   Step as GitHubStep,
 } from './types.js';
+import {
+  convertMicrovmDependencies,
+  convertNixeryDependencies,
+} from './dependencies/convert.js';
+
+/**
+ * Tangled workflow keys with a GitHub representation.
+ */
+const WORKFLOW_KEYS = new Set<keyof Workflow>([
+  'engine',
+  'when',
+  'environment',
+  'steps',
+  'dependencies',
+]);
+
+/**
+ * Tangled step keys with a GitHub representation.
+ */
+const STEP_KEYS = new Set<keyof WorkflowStep>([
+  'command',
+  'name',
+  'environment',
+]);
+
+/**
+ * Throw if `value` has any key not listed in `known`. `context` labels the
+ * offending location in the error message.
+ */
+function assertKnownKeys<T extends object>(
+  value: T,
+  known: Set<keyof T>,
+  context: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (!known.has(key as keyof T)) {
+      throw new Error(`Unsupported ${context} key: ${key}`);
+    }
+  }
+}
 
 /**
  * Tangled event names mapped to their GitHub equivalent.
@@ -117,6 +157,8 @@ function toJobId(path: string | undefined): string {
  * Translate a single tangled step into a GitHub step.
  */
 function toStep(step: WorkflowStep): GitHubStep {
+  assertKnownKeys(step, STEP_KEYS, 'step');
+
   const result: GitHubStep = { run: step.command };
 
   if (step.name) {
@@ -131,24 +173,33 @@ function toStep(step: WorkflowStep): GitHubStep {
 }
 
 /**
- * Translate a tangled workflow's `steps` into a GitHub `jobs` map. All steps
- * run in a single job, whose id is derived from `path`. An empty or omitted
- * `steps` yields an empty map.
+ * Wrap a list of GitHub steps in a single job, whose id is derived from `path`.
+ * An empty list yields an empty jobs map.
  */
 function toJobs(
-  steps: WorkflowStep[] | undefined,
+  steps: GitHubStep[],
   path: string | undefined,
 ): GitHubWorkflow['jobs'] {
-  if (!steps || steps.length === 0) {
+  if (steps.length === 0) {
     return {};
   }
 
   return {
     [toJobId(path)]: {
       'runs-on': RUNNER,
-      steps: steps.map(toStep) as [GitHubStep, ...GitHubStep[]],
+      steps: steps as [GitHubStep, ...GitHubStep[]],
     },
   };
+}
+
+/**
+ * Translate a tangled workflow's dependencies into the leading `uses` steps
+ * that provide them.
+ */
+function toDependencySteps(workflow: Workflow): GitHubStep[] {
+  return workflow.engine === 'nixery'
+    ? convertNixeryDependencies(workflow.dependencies)
+    : convertMicrovmDependencies(workflow.dependencies);
 }
 
 /**
@@ -178,8 +229,15 @@ export function convertWorkflow(
   workflow: Workflow,
   path?: string,
 ): GitHubWorkflow {
+  assertKnownKeys(workflow, WORKFLOW_KEYS, 'workflow');
+
+  const steps = [
+    ...toDependencySteps(workflow),
+    ...(workflow.steps ?? []).map(toStep),
+  ];
+
   return {
-    jobs: toJobs(workflow.steps, path),
+    jobs: toJobs(steps, path),
     ...toGitHubBase(workflow),
   };
 }

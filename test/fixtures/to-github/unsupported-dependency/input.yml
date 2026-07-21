@@ -1,0 +1,6 @@
+engine: nixery
+steps:
+  - command: rg TODO
+dependencies:
+  nixpkgs:
+    - ripgrep
