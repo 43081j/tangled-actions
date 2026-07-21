@@ -1,10 +1,10 @@
 {
-  "name": "@43081j/tangled-actions",
+  "name": "tangleflow",
   "version": "0.1.0",
-  "description": "Converts GitHub actions workflow YAML into a tangled pipeline.",
+  "description": "Converts GitHub actions into Tangled workflows and vice versa.",
   "main": "./lib/main.js",
   "bin": {
-    "tangled-actions": "./lib/cli.js"
+    "tangleflow": "./lib/cli.js"
   },
   "type": "module",
   "exports": {
@@ -39,13 +39,13 @@
   "publishConfig": {
     "access": "public"
   },
-  "homepage": "https://github.com/43081j/tangled-actions#readme",
+  "homepage": "https://github.com/43081j/tangleflow#readme",
   "bugs": {
-    "url": "https://github.com/43081j/tangled-actions/issues"
+    "url": "https://github.com/43081j/tangleflow/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/43081j/tangled-actions.git"
+    "url": "git+https://github.com/43081j/tangleflow.git"
   },
   "peerDependencies": {
     "yaml": "^2.9.0"
