@@ -32,16 +32,23 @@ const WORKFLOW_KEYS = new Set<keyof GitHubWorkflow>([
  * GitHub job keys with a tangled representation.
  */
 const JOB_KEYS = new Set<keyof NormalJob>([
+  'name',
   'runs-on',
   'steps',
   'permissions',
   'concurrency',
+  'timeout-minutes',
 ]);
 
 /**
  * GitHub step keys with a tangled representation.
  */
-const STEP_KEYS = new Set<keyof GitHubStep>(['run', 'name', 'env']);
+const STEP_KEYS = new Set<keyof GitHubStep>([
+  'run',
+  'name',
+  'env',
+  'timeout-minutes',
+]);
 
 /**
  * Throw if `value` has any key not listed in `known`. `context` labels the

@@ -38,6 +38,27 @@ describe('toTangled', () => {
     expect(toTangled(workflow())).toEqual([{ engine: 'nixery' }]);
   });
 
+  it('retains step names and environment', () => {
+    expect(
+      toTangled(
+        workflow({
+          jobs: {
+            build: {
+              steps: [{ name: 'Test', run: 'npm test', env: { CI: 'true' } }],
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        engine: 'nixery',
+        steps: [
+          { command: 'npm test', name: 'Test', environment: { CI: 'true' } },
+        ],
+      },
+    ]);
+  });
+
   it('throws on job dependencies, which have no tangled equivalent', () => {
     expect(() =>
       toTangled(workflow({ jobs: { build: { needs: ['lint'], steps: [] } } })),
@@ -65,6 +86,32 @@ describe('toTangled', () => {
         }),
       ),
     ).toEqual([{ engine: 'nixery' }]);
+  });
+
+  it('drops a job-level name', () => {
+    expect(
+      toTangled(
+        workflow({
+          jobs: { build: { 'runs-on': 'x', name: 'Lint' } },
+        }),
+      ),
+    ).toEqual([{ engine: 'nixery' }]);
+  });
+
+  it('drops timeout-minutes on jobs and steps', () => {
+    expect(
+      toTangled(
+        workflow({
+          jobs: {
+            build: {
+              'runs-on': 'x',
+              'timeout-minutes': 10,
+              steps: [{ run: 'npm test', 'timeout-minutes': 5 }],
+            },
+          },
+        }),
+      ),
+    ).toEqual([{ engine: 'nixery', steps: [{ command: 'npm test' }] }]);
   });
 
   describe('permissions', () => {
