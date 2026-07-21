@@ -3,9 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { convertWorkflowFile } from './main.js';
 
-const fixturesDir = fileURLToPath(
-  new URL('../test/fixtures', import.meta.url),
-);
+const fixturesDir = fileURLToPath(new URL('../test/fixtures', import.meta.url));
 
 const fixtures = readdirSync(fixturesDir, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
