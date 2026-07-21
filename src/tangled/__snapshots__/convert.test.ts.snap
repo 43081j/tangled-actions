@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`toTangled > fixtures > converts npm-ci 1`] = `
+exports[`convertWorkflow > fixtures > converts npm-ci 1`] = `
 [
   {
     "dependencies": {
@@ -63,13 +63,13 @@ exports[`toTangled > fixtures > converts npm-ci 1`] = `
 ]
 `;
 
-exports[`toTangled > fixtures > converts vitest-ci 1`] = `
+exports[`convertWorkflow > fixtures > converts vitest-ci 1`] = `
 {
   "error": "Unsupported action: ./.github/actions/setup-and-cache",
 }
 `;
 
-exports[`toTangled > fixtures > converts vitest-publish 1`] = `
+exports[`convertWorkflow > fixtures > converts vitest-publish 1`] = `
 {
   "error": "Unsupported workflow permissions: "contents: write" has no tangled equivalent",
 }

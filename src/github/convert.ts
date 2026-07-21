@@ -1,5 +1,6 @@
 import { basename } from 'node:path';
 import type {
+  Pipeline,
   Workflow,
   WorkflowConstraint,
   WorkflowEvent,
@@ -173,9 +174,19 @@ function toGitHubBase(
 /**
  * Convert a tangled workflow into an equivalent GitHub Actions workflow.
  */
-export function toGitHub(workflow: Workflow, path?: string): GitHubWorkflow {
+export function convertWorkflow(
+  workflow: Workflow,
+  path?: string,
+): GitHubWorkflow {
   return {
     jobs: toJobs(workflow.steps, path),
     ...toGitHubBase(workflow),
   };
+}
+
+export function convertPipeline(
+  pipeline: Pipeline,
+  path?: string,
+): GitHubWorkflow[] {
+  return pipeline.map((workflow) => convertWorkflow(workflow, path));
 }

@@ -297,7 +297,7 @@ function toWorkflow(
  * workflow per GitHub job. Throws on any workflow, job, or step configuration
  * that has no tangled representation, rather than silently dropping it.
  */
-export function toTangled(workflow: GitHubWorkflow): Pipeline {
+export function convertWorkflow(workflow: GitHubWorkflow): Pipeline {
   assertKnownKeys(workflow, WORKFLOW_KEYS, 'workflow');
   assertPermissions(workflow.permissions, 'workflow');
 

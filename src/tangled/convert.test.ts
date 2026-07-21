@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { parse } from 'yaml';
-import { toTangled } from './convert.js';
+import { convertWorkflow } from './convert.js';
 import type { HttpsJsonSchemastoreOrgGithubWorkflowJson as GitHubWorkflow } from '../github/types.js';
 
 const fixturesDir = fileURLToPath(
@@ -17,9 +17,9 @@ function workflow(overrides: Record<string, unknown> = {}): GitHubWorkflow {
   } as GitHubWorkflow;
 }
 
-describe('toTangled', () => {
+describe('convertWorkflow', () => {
   it('maps each job to its own workflow', () => {
-    const result = toTangled(
+    const result = convertWorkflow(
       workflow({
         jobs: {
           lint: { steps: [{ run: 'npm run lint' }] },
@@ -35,12 +35,12 @@ describe('toTangled', () => {
   });
 
   it('produces one bare nixery workflow per job by default', () => {
-    expect(toTangled(workflow())).toEqual([{ engine: 'nixery' }]);
+    expect(convertWorkflow(workflow())).toEqual([{ engine: 'nixery' }]);
   });
 
   it('retains step names and environment', () => {
     expect(
-      toTangled(
+      convertWorkflow(
         workflow({
           jobs: {
             build: {
@@ -61,13 +61,15 @@ describe('toTangled', () => {
 
   it('throws on job dependencies, which have no tangled equivalent', () => {
     expect(() =>
-      toTangled(workflow({ jobs: { build: { needs: ['lint'], steps: [] } } })),
+      convertWorkflow(
+        workflow({ jobs: { build: { needs: ['lint'], steps: [] } } }),
+      ),
     ).toThrow('Unsupported job "build" key: needs');
   });
 
   it('drops workflow-level concurrency', () => {
     expect(
-      toTangled(
+      convertWorkflow(
         workflow({
           concurrency: {
             group: 'ci-${{ github.ref }}',
@@ -80,7 +82,7 @@ describe('toTangled', () => {
 
   it('drops job-level concurrency', () => {
     expect(
-      toTangled(
+      convertWorkflow(
         workflow({
           jobs: { build: { 'runs-on': 'x', concurrency: 'ci' } },
         }),
@@ -90,7 +92,7 @@ describe('toTangled', () => {
 
   it('drops a job-level name', () => {
     expect(
-      toTangled(
+      convertWorkflow(
         workflow({
           jobs: { build: { 'runs-on': 'x', name: 'Lint' } },
         }),
@@ -100,7 +102,7 @@ describe('toTangled', () => {
 
   it('drops timeout-minutes on jobs and steps', () => {
     expect(
-      toTangled(
+      convertWorkflow(
         workflow({
           jobs: {
             build: {
@@ -116,20 +118,20 @@ describe('toTangled', () => {
 
   describe('permissions', () => {
     it('drops workflow-level permissions with no tangled equivalent', () => {
-      expect(toTangled(workflow({ permissions: { issues: 'read' } }))).toEqual([
-        { engine: 'nixery' },
-      ]);
+      expect(
+        convertWorkflow(workflow({ permissions: { issues: 'read' } })),
+      ).toEqual([{ engine: 'nixery' }]);
     });
 
     it('drops an empty permissions map', () => {
-      expect(toTangled(workflow({ permissions: {} }))).toEqual([
+      expect(convertWorkflow(workflow({ permissions: {} }))).toEqual([
         { engine: 'nixery' },
       ]);
     });
 
     it('drops job-level permissions with no tangled equivalent', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: { 'runs-on': 'x', permissions: { issues: 'read' } },
@@ -141,25 +143,25 @@ describe('toTangled', () => {
 
     it('throws on contents: write', () => {
       expect(() =>
-        toTangled(workflow({ permissions: { contents: 'write' } })),
+        convertWorkflow(workflow({ permissions: { contents: 'write' } })),
       ).toThrow('Unsupported workflow permissions: "contents: write"');
     });
 
     it('throws on id-token: write', () => {
       expect(() =>
-        toTangled(workflow({ permissions: { 'id-token': 'write' } })),
+        convertWorkflow(workflow({ permissions: { 'id-token': 'write' } })),
       ).toThrow('Unsupported workflow permissions: "id-token: write"');
     });
 
     it('throws on write-all', () => {
-      expect(() => toTangled(workflow({ permissions: 'write-all' }))).toThrow(
-        'Unsupported workflow permissions: write access',
-      );
+      expect(() =>
+        convertWorkflow(workflow({ permissions: 'write-all' })),
+      ).toThrow('Unsupported workflow permissions: write access');
     });
 
     it('throws on job-level write grants', () => {
       expect(() =>
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: { 'runs-on': 'x', permissions: { contents: 'write' } },
@@ -172,26 +174,28 @@ describe('toTangled', () => {
 
   describe('when', () => {
     it('maps a string trigger to a single constraint', () => {
-      expect(toTangled(workflow({ on: 'push' }))).toEqual([
+      expect(convertWorkflow(workflow({ on: 'push' }))).toEqual([
         { engine: 'nixery', when: [{ event: 'push' }] },
       ]);
     });
 
     it('maps workflow_dispatch to manual', () => {
-      expect(toTangled(workflow({ on: 'workflow_dispatch' }))).toEqual([
+      expect(convertWorkflow(workflow({ on: 'workflow_dispatch' }))).toEqual([
         { engine: 'nixery', when: [{ event: 'manual' }] },
       ]);
     });
 
     it('drops a string trigger tangled does not understand', () => {
-      expect(toTangled(workflow({ on: 'schedule' }))).toEqual([
+      expect(convertWorkflow(workflow({ on: 'schedule' }))).toEqual([
         { engine: 'nixery' },
       ]);
     });
 
     it('maps an array of triggers, dropping unknown ones', () => {
       expect(
-        toTangled(workflow({ on: ['push', 'schedule', 'workflow_dispatch'] })),
+        convertWorkflow(
+          workflow({ on: ['push', 'schedule', 'workflow_dispatch'] }),
+        ),
       ).toEqual([
         { engine: 'nixery', when: [{ event: 'push' }, { event: 'manual' }] },
       ]);
@@ -199,7 +203,7 @@ describe('toTangled', () => {
 
     it('maps an object trigger with no config to bare constraints', () => {
       expect(
-        toTangled(workflow({ on: { push: null, pull_request: null } })),
+        convertWorkflow(workflow({ on: { push: null, pull_request: null } })),
       ).toEqual([
         {
           engine: 'nixery',
@@ -210,7 +214,7 @@ describe('toTangled', () => {
 
     it('drops object-trigger events tangled does not understand', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({ on: { push: null, schedule: [{ cron: '0 0 * * *' }] } }),
         ),
       ).toEqual([{ engine: 'nixery', when: [{ event: 'push' }] }]);
@@ -218,7 +222,7 @@ describe('toTangled', () => {
 
     it('maps branches, tags and paths filters to tangled fields', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             on: {
               push: {
@@ -245,26 +249,28 @@ describe('toTangled', () => {
     });
 
     it('ignores empty filter arrays', () => {
-      expect(toTangled(workflow({ on: { push: { branches: [] } } }))).toEqual([
-        { engine: 'nixery', when: [{ event: 'push' }] },
-      ]);
+      expect(
+        convertWorkflow(workflow({ on: { push: { branches: [] } } })),
+      ).toEqual([{ engine: 'nixery', when: [{ event: 'push' }] }]);
     });
   });
 
   describe('environment', () => {
     it('omits environment when env is absent', () => {
-      expect(toTangled(workflow())).toEqual([{ engine: 'nixery' }]);
+      expect(convertWorkflow(workflow())).toEqual([{ engine: 'nixery' }]);
     });
 
     it('maps env to environment', () => {
-      expect(toTangled(workflow({ env: { FOO: 'bar', BAZ: 'qux' } }))).toEqual([
+      expect(
+        convertWorkflow(workflow({ env: { FOO: 'bar', BAZ: 'qux' } })),
+      ).toEqual([
         { engine: 'nixery', environment: { FOO: 'bar', BAZ: 'qux' } },
       ]);
     });
 
     it('stringifies non-string env values', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({ env: { COUNT: 3, FLAG: true } as GitHubWorkflow['env'] }),
         ),
       ).toEqual([
@@ -273,16 +279,16 @@ describe('toTangled', () => {
     });
 
     it('drops a string env expression that cannot be represented as a map', () => {
-      expect(toTangled(workflow({ env: '${{ fromJSON(env.VARS) }}' }))).toEqual(
-        [{ engine: 'nixery' }],
-      );
+      expect(
+        convertWorkflow(workflow({ env: '${{ fromJSON(env.VARS) }}' })),
+      ).toEqual([{ engine: 'nixery' }]);
     });
   });
 
   describe('uses', () => {
     it('converts actions/setup-node to a nodejs nixpkgs dependency', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: { build: { steps: [{ uses: 'actions/setup-node@v4' }] } },
           }),
@@ -292,7 +298,7 @@ describe('toTangled', () => {
 
     it('selects the matching nodejs major from node-version', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -313,7 +319,7 @@ describe('toTangled', () => {
 
     it('parses a major from a non-numeric node-version selector', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -334,7 +340,7 @@ describe('toTangled', () => {
 
     it('falls back to nodejs for an unparseable node-version', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -353,7 +359,7 @@ describe('toTangled', () => {
 
     it('keeps run steps alongside dependencies from uses steps', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -373,7 +379,7 @@ describe('toTangled', () => {
 
     it('deduplicates dependencies contributed by repeated actions', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -390,7 +396,7 @@ describe('toTangled', () => {
 
     it('converts actions/checkout with no inputs to no clone config', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: { build: { steps: [{ uses: 'actions/checkout@v4' }] } },
           }),
@@ -400,7 +406,7 @@ describe('toTangled', () => {
 
     it('maps checkout fetch-depth, submodules and fetch-tags to clone', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -428,7 +434,7 @@ describe('toTangled', () => {
 
     it('reads string-form checkout inputs', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -447,7 +453,7 @@ describe('toTangled', () => {
 
     it('treats recursive submodules as a submodule clone', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -466,7 +472,7 @@ describe('toTangled', () => {
 
     it('ignores unparseable checkout inputs', () => {
       expect(
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: {
               build: {
@@ -485,7 +491,7 @@ describe('toTangled', () => {
 
     it('throws on an unknown action', () => {
       expect(() =>
-        toTangled(
+        convertWorkflow(
           workflow({
             jobs: { build: { steps: [{ uses: 'some/unknown-action@v1' }] } },
           }),
@@ -505,7 +511,7 @@ describe('toTangled', () => {
 
       let result: unknown;
       try {
-        result = toTangled(input);
+        result = convertWorkflow(input);
       } catch (error) {
         result = { error: (error as Error).message };
       }

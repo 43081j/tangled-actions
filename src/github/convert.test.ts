@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toGitHub } from './convert.js';
+import { convertWorkflow } from './convert.js';
 import type { Workflow } from '../tangled/types.js';
 import type { NormalJob } from './types.js';
 
@@ -7,14 +7,14 @@ function nixery(overrides: Partial<Workflow> = {}): Workflow {
   return { engine: 'nixery', ...overrides } as Workflow;
 }
 
-describe('toGitHub', () => {
+describe('convertWorkflow', () => {
   it('produces an empty jobs map and no triggers by default', () => {
-    expect(toGitHub(nixery())).toEqual({ jobs: {}, on: {} });
+    expect(convertWorkflow(nixery())).toEqual({ jobs: {}, on: {} });
   });
 
   describe('on', () => {
     it('maps tangled events to their GitHub equivalents', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({
           when: [
             { event: 'push' },
@@ -32,7 +32,7 @@ describe('toGitHub', () => {
     });
 
     it('expands an array of events on a single constraint', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({ when: [{ event: ['push', 'pull_request'] }] }),
       );
 
@@ -40,13 +40,13 @@ describe('toGitHub', () => {
     });
 
     it('drops constraints without an event', () => {
-      const result = toGitHub(nixery({ when: [{ branch: 'main' }] }));
+      const result = convertWorkflow(nixery({ when: [{ branch: 'main' }] }));
 
       expect(result.on).toEqual({});
     });
 
     it('maps branch, tag and paths filters to their GitHub keys', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({
           when: [
             {
@@ -69,7 +69,7 @@ describe('toGitHub', () => {
     });
 
     it('preserves array filter values', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({
           when: [{ event: 'push', branch: ['main', 'dev'] }],
         }),
@@ -79,7 +79,7 @@ describe('toGitHub', () => {
     });
 
     it('drops filters on events that do not accept them', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({
           when: [{ event: 'manual', branch: 'main', paths: 'src/**' }],
         }),
@@ -89,7 +89,7 @@ describe('toGitHub', () => {
     });
 
     it('merges filters from multiple constraints targeting the same event', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({
           when: [
             { event: 'push', branch: 'main' },
@@ -107,7 +107,7 @@ describe('toGitHub', () => {
     });
 
     it('deduplicates merged filter values', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({
           when: [
             { event: 'push', branch: ['main', 'dev'] },
@@ -124,11 +124,11 @@ describe('toGitHub', () => {
 
   describe('env', () => {
     it('omits env when there is no environment', () => {
-      expect(toGitHub(nixery())).not.toHaveProperty('env');
+      expect(convertWorkflow(nixery())).not.toHaveProperty('env');
     });
 
     it('maps environment to workflow-level env', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({ environment: { FOO: 'bar', BAZ: 'qux' } }),
       );
 
@@ -137,7 +137,7 @@ describe('toGitHub', () => {
 
     it('copies the environment rather than referencing it', () => {
       const environment = { FOO: 'bar' };
-      const result = toGitHub(nixery({ environment }));
+      const result = convertWorkflow(nixery({ environment }));
 
       expect(result.env).not.toBe(environment);
     });
@@ -145,12 +145,12 @@ describe('toGitHub', () => {
 
   describe('steps', () => {
     it('produces an empty jobs map when there are no steps', () => {
-      expect(toGitHub(nixery()).jobs).toEqual({});
-      expect(toGitHub(nixery({ steps: [] })).jobs).toEqual({});
+      expect(convertWorkflow(nixery()).jobs).toEqual({});
+      expect(convertWorkflow(nixery({ steps: [] })).jobs).toEqual({});
     });
 
     it('wraps steps in a single job on the default runner', () => {
-      const result = toGitHub(nixery({ steps: [{ command: 'make' }] }));
+      const result = convertWorkflow(nixery({ steps: [{ command: 'make' }] }));
 
       expect(result.jobs).toEqual({
         build: {
@@ -161,7 +161,7 @@ describe('toGitHub', () => {
     });
 
     it('maps command, name and environment onto each step', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({
           steps: [
             { command: 'npm test', name: 'Test', environment: { CI: 'true' } },
@@ -175,7 +175,7 @@ describe('toGitHub', () => {
     });
 
     it('preserves step order', () => {
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({
           steps: [{ command: 'a' }, { command: 'b' }, { command: 'c' }],
         }),
@@ -189,7 +189,7 @@ describe('toGitHub', () => {
     });
 
     it('omits name and env when the step has neither', () => {
-      const result = toGitHub(nixery({ steps: [{ command: 'make' }] }));
+      const result = convertWorkflow(nixery({ steps: [{ command: 'make' }] }));
       const step = (result.jobs.build as NormalJob).steps![0];
 
       expect(step).not.toHaveProperty('name');
@@ -198,7 +198,7 @@ describe('toGitHub', () => {
 
     it('copies step environment rather than referencing it', () => {
       const environment = { FOO: 'bar' };
-      const result = toGitHub(
+      const result = convertWorkflow(
         nixery({ steps: [{ command: 'make', environment }] }),
       );
       const step = (result.jobs.build as NormalJob).steps![0];
@@ -210,7 +210,7 @@ describe('toGitHub', () => {
   describe('job id', () => {
     const withJob = (path?: string) =>
       Object.keys(
-        toGitHub(nixery({ steps: [{ command: 'make' }] }), path).jobs,
+        convertWorkflow(nixery({ steps: [{ command: 'make' }] }), path).jobs,
       );
 
     it('defaults to "build" when no path is given', () => {
