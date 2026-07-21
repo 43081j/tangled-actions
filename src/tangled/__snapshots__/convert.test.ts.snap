@@ -1,9 +1,66 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`toTangled > fixtures > converts npm-ci 1`] = `
-{
-  "error": "Unsupported job "test" key: needs",
-}
+[
+  {
+    "dependencies": {
+      "nixpkgs": [
+        "nodejs_24",
+      ],
+    },
+    "engine": "nixery",
+    "steps": [
+      {
+        "command": "npm ci --ignore-scripts",
+        "name": "Install Dependencies",
+      },
+      {
+        "command": "npm run lint",
+        "name": "Lint",
+      },
+    ],
+    "when": [
+      {
+        "branch": [
+          "main",
+        ],
+        "event": "push",
+      },
+      {
+        "event": "pull_request",
+      },
+    ],
+  },
+  {
+    "dependencies": {
+      "nixpkgs": [
+        "nodejs_24",
+      ],
+    },
+    "engine": "nixery",
+    "steps": [
+      {
+        "command": "npm ci --ignore-scripts",
+        "name": "Install Dependencies",
+      },
+      {
+        "command": "npm test",
+        "name": "Test",
+      },
+    ],
+    "when": [
+      {
+        "branch": [
+          "main",
+        ],
+        "event": "push",
+      },
+      {
+        "event": "pull_request",
+      },
+    ],
+  },
+]
 `;
 
 exports[`toTangled > fixtures > converts vitest-ci 1`] = `
