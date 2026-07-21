@@ -1,6 +1,6 @@
 {
   "name": "tangleflow",
-  "version": "0.1.0",
+  "version": "0.0.0-dev",
   "description": "Converts GitHub actions into Tangled workflows and vice versa.",
   "main": "./lib/main.js",
   "bin": {
