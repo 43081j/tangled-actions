@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { convertWorkflowToGitHub, convertWorkflowToTangled } from './main.js';
 import type { HttpsJsonSchemastoreOrgGithubWorkflowJson as GitHubWorkflow } from './github/types.js';
 import type { Workflow } from './tangled/types.js';
+import { parse, stringify } from 'yaml';
 
 const GITHUB_DIR = '.github/workflows';
 const TANGLED_DIR = '.tangled/workflows';
@@ -25,20 +26,6 @@ If no file is given, every workflow in the source directory is converted:
   --target=tangled  reads ${GITHUB_DIR}/*.{yml,yaml}
   --target=gh       reads ${TANGLED_DIR}/*.{yml,yaml}
 `;
-
-/**
- * Load the optional `yaml` peer dependency, throwing a helpful error if it is
- * not installed.
- */
-async function loadYaml(): Promise<typeof import('yaml')> {
-  try {
-    return await import('yaml');
-  } catch {
-    throw new Error(
-      'The "yaml" package is required to convert workflow files. Install it with `npm install yaml`.',
-    );
-  }
-}
 
 /**
  * List the YAML files in `dir`. A missing directory yields an empty list.
@@ -75,7 +62,6 @@ function stripExtension(path: string): string {
  * workflow becomes its own `.tangled/workflows/<job>.yml` file.
  */
 async function convertToTangled(files: string[]): Promise<void> {
-  const { parse, stringify } = await loadYaml();
   await mkdir(TANGLED_DIR, { recursive: true });
 
   await Promise.all(
@@ -101,7 +87,6 @@ async function convertToTangled(files: string[]): Promise<void> {
  * becomes a `.github/workflows/<name>.yml` file.
  */
 async function convertToGitHub(files: string[]): Promise<void> {
-  const { parse, stringify } = await loadYaml();
   await mkdir(GITHUB_DIR, { recursive: true });
 
   await Promise.all(

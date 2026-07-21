@@ -6,24 +6,10 @@ Converts [GitHub Actions](https://docs.github.com/actions) workflows into
 Use it as a command-line tool to convert the workflow files in a repository, or
 as a library to convert parsed workflow objects in your own code.
 
-## Installation
+## Usage
 
 ```sh
-npm install tangleflow
-```
-
-Parsing and writing YAML files (both in the CLI and `convertWorkflowFile`)
-requires the optional [`yaml`](https://www.npmjs.com/package/yaml) peer
-dependency:
-
-```sh
-npm install yaml
-```
-
-## CLI
-
-```sh
-tangleflow --target=<tangled|gh> [file...]
+npx tangleflow --target=<tangled|gh> [file...]
 ```
 
 | Option | Description |
@@ -40,6 +26,12 @@ If no files are given, every workflow in the source directory is converted:
 
 When converting to tangled, each job in a source workflow becomes its own
 `.tangled/workflows/<job>.yml` file.
+
+## Install (as a library)
+
+```sh
+npm install tangleflow
+```
 
 ## API
 
