@@ -25,12 +25,18 @@ const WORKFLOW_KEYS = new Set<keyof GitHubWorkflow>([
   'env',
   'jobs',
   'permissions',
+  'concurrency',
 ]);
 
 /**
  * GitHub job keys with a tangled representation.
  */
-const JOB_KEYS = new Set<keyof NormalJob>(['runs-on', 'steps', 'permissions']);
+const JOB_KEYS = new Set<keyof NormalJob>([
+  'runs-on',
+  'steps',
+  'permissions',
+  'concurrency',
+]);
 
 /**
  * GitHub step keys with a tangled representation.

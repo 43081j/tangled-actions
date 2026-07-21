@@ -8,7 +8,7 @@ exports[`toTangled > fixtures > converts npm-ci 1`] = `
 
 exports[`toTangled > fixtures > converts vitest-ci 1`] = `
 {
-  "error": "Unsupported workflow key: concurrency",
+  "error": "Unsupported job "lint" key: timeout-minutes",
 }
 `;
 

@@ -44,6 +44,29 @@ describe('toTangled', () => {
     ).toThrow('Unsupported job "build" key: needs');
   });
 
+  it('drops workflow-level concurrency', () => {
+    expect(
+      toTangled(
+        workflow({
+          concurrency: {
+            group: 'ci-${{ github.ref }}',
+            'cancel-in-progress': true,
+          },
+        }),
+      ),
+    ).toEqual([{ engine: 'nixery' }]);
+  });
+
+  it('drops job-level concurrency', () => {
+    expect(
+      toTangled(
+        workflow({
+          jobs: { build: { 'runs-on': 'x', concurrency: 'ci' } },
+        }),
+      ),
+    ).toEqual([{ engine: 'nixery' }]);
+  });
+
   describe('permissions', () => {
     it('drops workflow-level permissions with no tangled equivalent', () => {
       expect(toTangled(workflow({ permissions: { issues: 'read' } }))).toEqual([
