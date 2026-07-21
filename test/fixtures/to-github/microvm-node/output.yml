@@ -1,18 +1,13 @@
 jobs:
-  lint:
+  microvm-node:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "20"
       - run: npm ci --ignore-scripts
         name: Install Dependencies
-      - run: npm run lint
-        name: Lint
+      - run: npm test
+        name: Test
 on:
-  push:
-    branches:
-      - main
-  pull_request: {}
-env:
-  CI: "true"
+  push: {}

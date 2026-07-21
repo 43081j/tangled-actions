@@ -1,0 +1,4 @@
+engine: microvm
+image: debian
+steps:
+  - command: ./build.sh
