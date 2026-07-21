@@ -1,309 +1,416 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+import { parse } from 'yaml';
 import { toTangled } from './convert.js';
 import type { HttpsJsonSchemastoreOrgGithubWorkflowJson as GitHubWorkflow } from '../github/types.js';
 
+const fixturesDir = fileURLToPath(
+  new URL('../../test/fixtures', import.meta.url),
+);
+
 function workflow(overrides: Record<string, unknown> = {}): GitHubWorkflow {
-  return { on: {}, jobs: {}, ...overrides } as GitHubWorkflow;
+  return {
+    on: {},
+    jobs: { build: { 'runs-on': 'ubuntu-latest' } },
+    ...overrides,
+  } as GitHubWorkflow;
 }
 
 describe('toTangled', () => {
-  it('produces a nixery workflow with no base fields by default', () => {
-    expect(toTangled(workflow())).toEqual({ engine: 'nixery' });
+  it('maps each job to its own workflow', () => {
+    const result = toTangled(
+      workflow({
+        jobs: {
+          lint: { steps: [{ run: 'npm run lint' }] },
+          test: { steps: [{ run: 'npm test' }] },
+        },
+      }),
+    );
+
+    expect(result).toEqual([
+      { engine: 'nixery', steps: [{ command: 'npm run lint' }] },
+      { engine: 'nixery', steps: [{ command: 'npm test' }] },
+    ]);
+  });
+
+  it('produces one bare nixery workflow per job by default', () => {
+    expect(toTangled(workflow())).toEqual([{ engine: 'nixery' }]);
+  });
+
+  it('throws on job dependencies, which have no tangled equivalent', () => {
+    expect(() =>
+      toTangled(workflow({ jobs: { build: { needs: ['lint'], steps: [] } } })),
+    ).toThrow('Unsupported job "build" key: needs');
+  });
+
+  describe('permissions', () => {
+    it('drops workflow-level permissions with no tangled equivalent', () => {
+      expect(toTangled(workflow({ permissions: { issues: 'read' } }))).toEqual([
+        { engine: 'nixery' },
+      ]);
+    });
+
+    it('drops an empty permissions map', () => {
+      expect(toTangled(workflow({ permissions: {} }))).toEqual([
+        { engine: 'nixery' },
+      ]);
+    });
+
+    it('drops job-level permissions with no tangled equivalent', () => {
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: { 'runs-on': 'x', permissions: { issues: 'read' } },
+            },
+          }),
+        ),
+      ).toEqual([{ engine: 'nixery' }]);
+    });
+
+    it('throws on contents: write', () => {
+      expect(() =>
+        toTangled(workflow({ permissions: { contents: 'write' } })),
+      ).toThrow('Unsupported workflow permissions: "contents: write"');
+    });
+
+    it('throws on id-token: write', () => {
+      expect(() =>
+        toTangled(workflow({ permissions: { 'id-token': 'write' } })),
+      ).toThrow('Unsupported workflow permissions: "id-token: write"');
+    });
+
+    it('throws on write-all', () => {
+      expect(() => toTangled(workflow({ permissions: 'write-all' }))).toThrow(
+        'Unsupported workflow permissions: write access',
+      );
+    });
+
+    it('throws on job-level write grants', () => {
+      expect(() =>
+        toTangled(
+          workflow({
+            jobs: {
+              build: { 'runs-on': 'x', permissions: { contents: 'write' } },
+            },
+          }),
+        ),
+      ).toThrow('Unsupported job "build" permissions: "contents: write"');
+    });
   });
 
   describe('when', () => {
     it('maps a string trigger to a single constraint', () => {
-      const result = toTangled(workflow({ on: 'push' }));
-
-      expect(result.when).toEqual([{ event: 'push' }]);
+      expect(toTangled(workflow({ on: 'push' }))).toEqual([
+        { engine: 'nixery', when: [{ event: 'push' }] },
+      ]);
     });
 
     it('maps workflow_dispatch to manual', () => {
-      const result = toTangled(workflow({ on: 'workflow_dispatch' }));
-
-      expect(result.when).toEqual([{ event: 'manual' }]);
+      expect(toTangled(workflow({ on: 'workflow_dispatch' }))).toEqual([
+        { engine: 'nixery', when: [{ event: 'manual' }] },
+      ]);
     });
 
     it('drops a string trigger tangled does not understand', () => {
-      const result = toTangled(workflow({ on: 'schedule' }));
-
-      expect(result.when).toBeUndefined();
+      expect(toTangled(workflow({ on: 'schedule' }))).toEqual([
+        { engine: 'nixery' },
+      ]);
     });
 
     it('maps an array of triggers, dropping unknown ones', () => {
-      const result = toTangled(
-        workflow({ on: ['push', 'schedule', 'workflow_dispatch'] }),
-      );
-
-      expect(result.when).toEqual([{ event: 'push' }, { event: 'manual' }]);
+      expect(
+        toTangled(workflow({ on: ['push', 'schedule', 'workflow_dispatch'] })),
+      ).toEqual([
+        { engine: 'nixery', when: [{ event: 'push' }, { event: 'manual' }] },
+      ]);
     });
 
     it('maps an object trigger with no config to bare constraints', () => {
-      const result = toTangled(
-        workflow({ on: { push: null, pull_request: null } }),
-      );
-
-      expect(result.when).toEqual([
-        { event: 'push' },
-        { event: 'pull_request' },
+      expect(
+        toTangled(workflow({ on: { push: null, pull_request: null } })),
+      ).toEqual([
+        {
+          engine: 'nixery',
+          when: [{ event: 'push' }, { event: 'pull_request' }],
+        },
       ]);
     });
 
     it('drops object-trigger events tangled does not understand', () => {
-      const result = toTangled(
-        workflow({ on: { push: null, schedule: [{ cron: '0 0 * * *' }] } }),
-      );
-
-      expect(result.when).toEqual([{ event: 'push' }]);
+      expect(
+        toTangled(
+          workflow({ on: { push: null, schedule: [{ cron: '0 0 * * *' }] } }),
+        ),
+      ).toEqual([{ engine: 'nixery', when: [{ event: 'push' }] }]);
     });
 
     it('maps branches, tags and paths filters to tangled fields', () => {
-      const result = toTangled(
-        workflow({
-          on: {
-            push: {
-              branches: ['main'],
-              tags: ['v1'],
+      expect(
+        toTangled(
+          workflow({
+            on: {
+              push: {
+                branches: ['main'],
+                tags: ['v1'],
+                paths: ['src/**'],
+              },
+            },
+          }),
+        ),
+      ).toEqual([
+        {
+          engine: 'nixery',
+          when: [
+            {
+              event: 'push',
+              branch: ['main'],
+              tag: ['v1'],
               paths: ['src/**'],
             },
-          },
-        }),
-      );
-
-      expect(result.when).toEqual([
-        {
-          event: 'push',
-          branch: ['main'],
-          tag: ['v1'],
-          paths: ['src/**'],
+          ],
         },
       ]);
     });
 
     it('ignores empty filter arrays', () => {
-      const result = toTangled(workflow({ on: { push: { branches: [] } } }));
-
-      expect(result.when).toEqual([{ event: 'push' }]);
+      expect(toTangled(workflow({ on: { push: { branches: [] } } }))).toEqual([
+        { engine: 'nixery', when: [{ event: 'push' }] },
+      ]);
     });
   });
 
   describe('environment', () => {
     it('omits environment when env is absent', () => {
-      expect(toTangled(workflow())).not.toHaveProperty('environment');
+      expect(toTangled(workflow())).toEqual([{ engine: 'nixery' }]);
     });
 
     it('maps env to environment', () => {
-      const result = toTangled(workflow({ env: { FOO: 'bar', BAZ: 'qux' } }));
-
-      expect(result.environment).toEqual({ FOO: 'bar', BAZ: 'qux' });
+      expect(toTangled(workflow({ env: { FOO: 'bar', BAZ: 'qux' } }))).toEqual([
+        { engine: 'nixery', environment: { FOO: 'bar', BAZ: 'qux' } },
+      ]);
     });
 
     it('stringifies non-string env values', () => {
-      const result = toTangled(
-        workflow({ env: { COUNT: 3, FLAG: true } as GitHubWorkflow['env'] }),
-      );
-
-      expect(result.environment).toEqual({ COUNT: '3', FLAG: 'true' });
+      expect(
+        toTangled(
+          workflow({ env: { COUNT: 3, FLAG: true } as GitHubWorkflow['env'] }),
+        ),
+      ).toEqual([
+        { engine: 'nixery', environment: { COUNT: '3', FLAG: 'true' } },
+      ]);
     });
 
     it('drops a string env expression that cannot be represented as a map', () => {
-      const result = toTangled(workflow({ env: '${{ fromJSON(env.VARS) }}' }));
-
-      expect(result.environment).toBeUndefined();
+      expect(toTangled(workflow({ env: '${{ fromJSON(env.VARS) }}' }))).toEqual(
+        [{ engine: 'nixery' }],
+      );
     });
   });
 
   describe('uses', () => {
     it('converts actions/setup-node to a nodejs nixpkgs dependency', () => {
-      const result = toTangled(
-        workflow({
-          jobs: { build: { steps: [{ uses: 'actions/setup-node@v4' }] } },
-        }),
-      );
-
-      expect(result).toMatchObject({ dependencies: { nixpkgs: ['nodejs'] } });
-      expect(result.steps).toBeUndefined();
+      expect(
+        toTangled(
+          workflow({
+            jobs: { build: { steps: [{ uses: 'actions/setup-node@v4' }] } },
+          }),
+        ),
+      ).toEqual([{ engine: 'nixery', dependencies: { nixpkgs: ['nodejs'] } }]);
     });
 
     it('selects the matching nodejs major from node-version', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            build: {
-              steps: [
-                { uses: 'actions/setup-node@v4', with: { 'node-version': 20 } },
-              ],
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [
+                  {
+                    uses: 'actions/setup-node@v4',
+                    with: { 'node-version': 20 },
+                  },
+                ],
+              },
             },
-          },
-        }),
-      );
-
-      expect(result).toMatchObject({
-        dependencies: { nixpkgs: ['nodejs_20'] },
-      });
+          }),
+        ),
+      ).toEqual([
+        { engine: 'nixery', dependencies: { nixpkgs: ['nodejs_20'] } },
+      ]);
     });
 
     it('parses a major from a non-numeric node-version selector', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            build: {
-              steps: [
-                {
-                  uses: 'actions/setup-node@v4',
-                  with: { 'node-version': '18.x' },
-                },
-              ],
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [
+                  {
+                    uses: 'actions/setup-node@v4',
+                    with: { 'node-version': '18.x' },
+                  },
+                ],
+              },
             },
-          },
-        }),
-      );
-
-      expect(result).toMatchObject({
-        dependencies: { nixpkgs: ['nodejs_18'] },
-      });
+          }),
+        ),
+      ).toEqual([
+        { engine: 'nixery', dependencies: { nixpkgs: ['nodejs_18'] } },
+      ]);
     });
 
     it('falls back to nodejs for an unparseable node-version', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            build: {
-              steps: [
-                {
-                  uses: 'actions/setup-node@v4',
-                  with: { 'node-version': 'lts/*' },
-                },
-              ],
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [
+                  {
+                    uses: 'actions/setup-node@v4',
+                    with: { 'node-version': 'lts/*' },
+                  },
+                ],
+              },
             },
-          },
-        }),
-      );
-
-      expect(result).toMatchObject({ dependencies: { nixpkgs: ['nodejs'] } });
+          }),
+        ),
+      ).toEqual([{ engine: 'nixery', dependencies: { nixpkgs: ['nodejs'] } }]);
     });
 
     it('keeps run steps alongside dependencies from uses steps', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            build: {
-              steps: [{ uses: 'actions/setup-node@v4' }, { run: 'npm test' }],
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [{ uses: 'actions/setup-node@v4' }, { run: 'npm test' }],
+              },
             },
-          },
-        }),
-      );
-
-      expect(result.steps).toEqual([{ command: 'npm test' }]);
-      expect(result).toMatchObject({ dependencies: { nixpkgs: ['nodejs'] } });
+          }),
+        ),
+      ).toEqual([
+        {
+          engine: 'nixery',
+          steps: [{ command: 'npm test' }],
+          dependencies: { nixpkgs: ['nodejs'] },
+        },
+      ]);
     });
 
     it('deduplicates dependencies contributed by repeated actions', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            a: { steps: [{ uses: 'actions/setup-node@v4' }] },
-            b: { steps: [{ uses: 'actions/setup-node@v3' }] },
-          },
-        }),
-      );
-
-      expect(result).toMatchObject({ dependencies: { nixpkgs: ['nodejs'] } });
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [
+                  { uses: 'actions/setup-node@v4' },
+                  { uses: 'actions/setup-node@v3' },
+                ],
+              },
+            },
+          }),
+        ),
+      ).toEqual([{ engine: 'nixery', dependencies: { nixpkgs: ['nodejs'] } }]);
     });
 
     it('converts actions/checkout with no inputs to no clone config', () => {
-      const result = toTangled(
-        workflow({
-          jobs: { build: { steps: [{ uses: 'actions/checkout@v4' }] } },
-        }),
-      );
-
-      expect(result.clone).toBeUndefined();
-      expect(result.steps).toBeUndefined();
+      expect(
+        toTangled(
+          workflow({
+            jobs: { build: { steps: [{ uses: 'actions/checkout@v4' }] } },
+          }),
+        ),
+      ).toEqual([{ engine: 'nixery' }]);
     });
 
     it('maps checkout fetch-depth, submodules and fetch-tags to clone', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            build: {
-              steps: [
-                {
-                  uses: 'actions/checkout@v4',
-                  with: {
-                    'fetch-depth': 0,
-                    submodules: true,
-                    'fetch-tags': false,
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [
+                  {
+                    uses: 'actions/checkout@v4',
+                    with: {
+                      'fetch-depth': 0,
+                      submodules: true,
+                      'fetch-tags': false,
+                    },
                   },
-                },
-              ],
+                ],
+              },
             },
-          },
-        }),
-      );
-
-      expect(result.clone).toEqual({
-        depth: 0,
-        submodules: true,
-        tags: false,
-      });
+          }),
+        ),
+      ).toEqual([
+        {
+          engine: 'nixery',
+          clone: { depth: 0, submodules: true, tags: false },
+        },
+      ]);
     });
 
     it('reads string-form checkout inputs', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            build: {
-              steps: [
-                {
-                  uses: 'actions/checkout@v4',
-                  with: { 'fetch-depth': '1', submodules: 'false' },
-                },
-              ],
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [
+                  {
+                    uses: 'actions/checkout@v4',
+                    with: { 'fetch-depth': '1', submodules: 'false' },
+                  },
+                ],
+              },
             },
-          },
-        }),
-      );
-
-      expect(result.clone).toEqual({ depth: 1, submodules: false });
+          }),
+        ),
+      ).toEqual([{ engine: 'nixery', clone: { depth: 1, submodules: false } }]);
     });
 
     it('treats recursive submodules as a submodule clone', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            build: {
-              steps: [
-                {
-                  uses: 'actions/checkout@v4',
-                  with: { submodules: 'recursive' },
-                },
-              ],
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [
+                  {
+                    uses: 'actions/checkout@v4',
+                    with: { submodules: 'recursive' },
+                  },
+                ],
+              },
             },
-          },
-        }),
-      );
-
-      expect(result.clone).toEqual({ submodules: true });
+          }),
+        ),
+      ).toEqual([{ engine: 'nixery', clone: { submodules: true } }]);
     });
 
     it('ignores unparseable checkout inputs', () => {
-      const result = toTangled(
-        workflow({
-          jobs: {
-            build: {
-              steps: [
-                {
-                  uses: 'actions/checkout@v4',
-                  with: { 'fetch-depth': 'shallow' },
-                },
-              ],
+      expect(
+        toTangled(
+          workflow({
+            jobs: {
+              build: {
+                steps: [
+                  {
+                    uses: 'actions/checkout@v4',
+                    with: { 'fetch-depth': 'shallow' },
+                  },
+                ],
+              },
             },
-          },
-        }),
-      );
-
-      expect(result.clone).toBeUndefined();
+          }),
+        ),
+      ).toEqual([{ engine: 'nixery' }]);
     });
 
     it('throws on an unknown action', () => {
@@ -314,6 +421,26 @@ describe('toTangled', () => {
           }),
         ),
       ).toThrow('Unsupported action: some/unknown-action@v1');
+    });
+  });
+
+  describe('fixtures', () => {
+    const fixtures = readdirSync(fixturesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+
+    it.each(fixtures)('converts %s', (name) => {
+      const source = readFileSync(`${fixturesDir}/${name}/input.yml`, 'utf8');
+      const input = parse(source) as GitHubWorkflow;
+
+      let result: unknown;
+      try {
+        result = toTangled(input);
+      } catch (error) {
+        result = { error: (error as Error).message };
+      }
+
+      expect(result).toMatchSnapshot();
     });
   });
 });

@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`toTangled > fixtures > converts npm-ci 1`] = `
+{
+  "error": "Unsupported job "test" key: needs",
+}
+`;
+
+exports[`toTangled > fixtures > converts vitest-ci 1`] = `
+{
+  "error": "Unsupported workflow key: concurrency",
+}
+`;
+
+exports[`toTangled > fixtures > converts vitest-publish 1`] = `
+{
+  "error": "Unsupported workflow permissions: "contents: write" has no tangled equivalent",
+}
+`;

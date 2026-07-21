@@ -1,8 +1,8 @@
 import type {
   NixeryWorkflow,
+  Pipeline,
   Workflow,
   WorkflowBase,
-  WorkflowCloneOptions,
   WorkflowConstraint,
   WorkflowEvent,
   WorkflowStep,
@@ -11,6 +11,7 @@ import type {
   HttpsJsonSchemastoreOrgGithubWorkflowJson as GitHubWorkflow,
   Event as GitHubEvent,
   NormalJob,
+  Permissions,
   Step as GitHubStep,
 } from '../github/types.js';
 import { convertAction } from './actions/index.js';
@@ -18,12 +19,18 @@ import { convertAction } from './actions/index.js';
 /**
  * Workflow-level keys with a tangled representation.
  */
-const WORKFLOW_KEYS = new Set<keyof GitHubWorkflow>(['on', 'env', 'jobs']);
+const WORKFLOW_KEYS = new Set<keyof GitHubWorkflow>([
+  'name',
+  'on',
+  'env',
+  'jobs',
+  'permissions',
+]);
 
 /**
  * GitHub job keys with a tangled representation.
  */
-const JOB_KEYS = new Set<keyof NormalJob>(['runs-on', 'steps']);
+const JOB_KEYS = new Set<keyof NormalJob>(['runs-on', 'steps', 'permissions']);
 
 /**
  * GitHub step keys with a tangled representation.
@@ -42,6 +49,37 @@ function assertKnownKeys<T extends object>(
   for (const key of Object.keys(value)) {
     if (!known.has(key as keyof T)) {
       throw new Error(`Unsupported ${context} key: ${key}`);
+    }
+  }
+}
+
+/**
+ * Permission scopes whose `write` grant a workflow relies on and tangled cannot
+ * provide, since it has no token to push to the repository or publish packages.
+ */
+const WRITE_DEPENDENT_SCOPES = ['contents', 'id-token'] as const;
+
+/**
+ * Throw if `permissions` grants write access tangled cannot honour. Any other
+ * permission configuration has no tangled representation and is dropped.
+ */
+function assertPermissions(
+  permissions: Permissions | undefined,
+  context: string,
+): void {
+  if (permissions === 'write-all') {
+    throw new Error(
+      `Unsupported ${context} permissions: write access has no tangled equivalent`,
+    );
+  }
+
+  if (permissions && typeof permissions === 'object') {
+    for (const scope of WRITE_DEPENDENT_SCOPES) {
+      if (permissions[scope] === 'write') {
+        throw new Error(
+          `Unsupported ${context} permissions: "${scope}: write" has no tangled equivalent`,
+        );
+      }
     }
   }
 }
@@ -150,13 +188,6 @@ function toStep(step: GitHubStep): WorkflowStep {
 }
 
 /**
- * The result of translating a GitHub `jobs` map: the tangled steps plus any
- * engine and workflow configuration contributed by known `uses` actions.
- */
-type JobsConversion = Required<Pick<NixeryWorkflow, 'steps' | 'dependencies'>> &
-  Pick<NixeryWorkflow, 'clone'>;
-
-/**
  * Merge `extra` nixery dependencies into `target`, appending packages per
  * registry without introducing duplicates.
  */
@@ -177,100 +208,99 @@ function mergeDependencies(
   }
 }
 
+type ToStepsResult = Required<Pick<NixeryWorkflow, 'steps' | 'dependencies'>> &
+  Pick<NixeryWorkflow, 'clone'>;
+
 /**
- * Translate a GitHub `jobs` map into tangled steps and the workflow
- * configuration implied by its `uses` steps. A `run` step becomes a tangled
- * step; a known `uses` step contributes engine or clone configuration; an
- * unknown `uses` step throws rather than being silently dropped.
+ * Translate a job's `steps` into tangled steps and the workflow configuration
+ * implied by its `uses` steps.
  */
-function toJobs(jobs: GitHubWorkflow['jobs']): JobsConversion {
-  const steps: WorkflowStep[] = [];
-  const dependencies: Record<string, string[]> = {};
-  let clone: WorkflowCloneOptions | undefined;
+function toSteps(steps: readonly GitHubStep[]): ToStepsResult {
+  const result: ToStepsResult = { steps: [], dependencies: {} };
 
-  for (const [id, job] of Object.entries(jobs)) {
-    if ('uses' in job) {
-      throw new Error(
-        `Unsupported job "${id}": reusable workflow calls have no tangled equivalent`,
-      );
-    }
-
-    assertKnownKeys(job, JOB_KEYS, `job "${id}"`);
-
-    for (const step of job.steps ?? []) {
-      if (typeof step.uses === 'string') {
-        const conversion = convertAction(step.uses, step);
-        if (!conversion) {
-          throw new Error(`Unsupported action: ${step.uses}`);
-        }
-        mergeDependencies(dependencies, conversion.dependencies);
-        if (conversion.clone) {
-          clone = conversion.clone;
-        }
-        continue;
+  for (const step of steps) {
+    if (typeof step.uses === 'string') {
+      const conversion = convertAction(step.uses, step);
+      if (!conversion) {
+        throw new Error(`Unsupported action: ${step.uses}`);
       }
-
-      steps.push(toStep(step));
+      mergeDependencies(result.dependencies, conversion.dependencies);
+      if (conversion.clone) {
+        result.clone = conversion.clone;
+      }
+      continue;
     }
+
+    result.steps.push(toStep(step));
   }
 
-  const result: JobsConversion = { steps, dependencies };
-  if (clone) {
-    result.clone = clone;
-  }
   return result;
 }
 
 /**
- * Convert the engine-agnostic fields of a GitHub Actions workflow into a
- * tangled workflow base. Engine-specific configuration is handled elsewhere.
+ * Translate a single GitHub job into a tangled workflow, carrying the
+ * workflow-level `shared` configuration onto it. Each job runs on its own
+ * runner in GitHub, so it becomes an independent workflow in the pipeline.
  */
-function toTangledBase(
-  workflow: GitHubWorkflow,
-  jobs: JobsConversion,
-): WorkflowBase {
-  const base: WorkflowBase = {};
+function toWorkflow(
+  id: string,
+  job: NormalJob,
+  shared: WorkflowBase,
+): Workflow {
+  if ('uses' in job) {
+    throw new Error(
+      `Unsupported job "${id}": reusable workflow calls have no tangled equivalent`,
+    );
+  }
+
+  assertKnownKeys(job, JOB_KEYS, `job "${id}"`);
+  assertPermissions(job.permissions, `job "${id}"`);
+
+  const { steps, dependencies, clone } = toSteps(job.steps ?? []);
+
+  const workflow: NixeryWorkflow = { engine: 'nixery' };
+
+  if (shared.when) {
+    workflow.when = shared.when;
+  }
+  if (clone) {
+    workflow.clone = clone;
+  }
+  if (steps.length > 0) {
+    workflow.steps = steps;
+  }
+  if (shared.environment) {
+    workflow.environment = shared.environment;
+  }
+  if (Object.keys(dependencies).length > 0) {
+    workflow.dependencies = dependencies;
+  }
+
+  return workflow;
+}
+
+/**
+ * Convert a GitHub Actions workflow into an equivalent tangled pipeline, one
+ * workflow per GitHub job. Throws on any workflow, job, or step configuration
+ * that has no tangled representation, rather than silently dropping it.
+ */
+export function toTangled(workflow: GitHubWorkflow): Pipeline {
+  assertKnownKeys(workflow, WORKFLOW_KEYS, 'workflow');
+  assertPermissions(workflow.permissions, 'workflow');
+
+  const shared: WorkflowBase = {};
 
   const when = toWhen(workflow.on);
   if (when.length > 0) {
-    base.when = when;
+    shared.when = when;
   }
 
   const environment = toEnvironment(workflow.env);
   if (environment) {
-    base.environment = environment;
+    shared.environment = environment;
   }
 
-  if (jobs.steps.length > 0) {
-    base.steps = jobs.steps;
-  }
-
-  if (jobs.clone) {
-    base.clone = jobs.clone;
-  }
-
-  return base;
-}
-
-/**
- * Convert a GitHub Actions workflow into an equivalent tangled workflow. Throws
- * on any workflow, job, or step configuration that has no tangled
- * representation, rather than silently dropping it.
- */
-export function toTangled(workflow: GitHubWorkflow): Workflow {
-  assertKnownKeys(workflow, WORKFLOW_KEYS, 'workflow');
-
-  const jobs = toJobs(workflow.jobs);
-  const base = toTangledBase(workflow, jobs);
-
-  const result: NixeryWorkflow = {
-    engine: 'nixery',
-    ...base,
-  };
-
-  if (Object.keys(jobs.dependencies).length > 0) {
-    result.dependencies = jobs.dependencies;
-  }
-
-  return result;
+  return Object.entries(workflow.jobs).map(([id, job]) =>
+    toWorkflow(id, job as NormalJob, shared),
+  );
 }
