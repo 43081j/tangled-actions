@@ -1,0 +1,20 @@
+- engine: nixery
+  when:
+    - event: push
+      branch:
+        - main
+  steps:
+    - command: npm run lint
+      name: "lint: Lint"
+    - command: npm test
+      name: "test: Test"
+    - command: npm run build
+      name: "build: Build"
+- engine: nixery
+  when:
+    - event: push
+      branch:
+        - main
+  steps:
+    - command: npm run docs:publish
+      name: Publish docs

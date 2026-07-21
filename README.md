@@ -24,8 +24,9 @@ If no files are given, every workflow in the source directory is converted:
 - `--target=gh` reads `.tangled/workflows/*.{yml,yaml}` and writes to
   `.github/workflows/`
 
-When converting to tangled, each job in a source workflow becomes its own
-`.tangled/workflows/<job>.yml` file.
+When converting to tangled, each independent job becomes its own
+`.tangled/workflows/<job>.yml` file. Jobs linked by `needs` collapse into a
+single workflow whose steps run in dependency order.
 
 ## Install (as a library)
 

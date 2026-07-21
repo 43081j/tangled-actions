@@ -63,12 +63,40 @@ describe('convertWorkflow', () => {
     ]);
   });
 
-  it('throws on job dependencies, which have no tangled equivalent', () => {
+  it('collapses jobs linked by needs into one ordered workflow', () => {
+    expect(
+      convertWorkflow(
+        workflow({
+          jobs: {
+            build: { 'runs-on': 'ubuntu-latest', needs: ['lint'] },
+            lint: {
+              'runs-on': 'ubuntu-latest',
+              steps: [{ run: 'npm run lint' }],
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      {
+        engine: 'nixery',
+        steps: [{ command: 'npm run lint', name: 'lint' }],
+      },
+    ]);
+  });
+
+  it('throws when jobs linked by needs run on different runners', () => {
     expect(() =>
       convertWorkflow(
-        workflow({ jobs: { build: { needs: ['lint'], steps: [] } } }),
+        workflow({
+          jobs: {
+            lint: { 'runs-on': 'ubuntu-latest', steps: [] },
+            build: { 'runs-on': 'macos-latest', needs: ['lint'] },
+          },
+        }),
       ),
-    ).toThrow('Unsupported job "build" key: needs');
+    ).toThrow(
+      'Jobs linked by `needs` run on different runners and cannot be combined: lint, build',
+    );
   });
 
   it('drops workflow-level concurrency', () => {

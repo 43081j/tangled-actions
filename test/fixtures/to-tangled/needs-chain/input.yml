@@ -1,0 +1,34 @@
+name: Needs Chain
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Lint
+        run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - name: Test
+        run: npm test
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - name: Build
+        run: npm run build
+
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish docs
+        run: npm run docs:publish
