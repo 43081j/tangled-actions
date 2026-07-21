@@ -15,6 +15,7 @@ import type {
   Step as GitHubStep,
 } from '../github/types.js';
 import { convertAction } from './actions/index.js';
+import { groupJobsByNeeds, type JobGroup } from './graph.js';
 
 /**
  * Workflow-level keys with a tangled representation.
@@ -34,6 +35,7 @@ const WORKFLOW_KEYS = new Set<keyof GitHubWorkflow>([
 const JOB_KEYS = new Set<keyof NormalJob>([
   'name',
   'runs-on',
+  'needs',
   'steps',
   'permissions',
   'concurrency',
@@ -177,9 +179,10 @@ function toEnvironment(
 }
 
 /**
- * Translate a single GitHub step into a tangled step.
+ * Translate a single GitHub step into a tangled step. When `jobId` is given the
+ * step's name is prefixed with it.
  */
-function toStep(step: GitHubStep): WorkflowStep {
+function toStep(step: GitHubStep, jobId?: string): WorkflowStep {
   assertKnownKeys(step, STEP_KEYS, 'step');
 
   if (typeof step.run !== 'string') {
@@ -188,8 +191,13 @@ function toStep(step: GitHubStep): WorkflowStep {
 
   const result: WorkflowStep = { command: step.run };
 
-  if (step.name !== undefined) {
-    result.name = step.name;
+  const name = jobId
+    ? step.name
+      ? `${jobId}: ${step.name}`
+      : jobId
+    : step.name;
+  if (name !== undefined) {
+    result.name = name;
   }
 
   const environment = toEnvironment(step.env);
@@ -225,12 +233,13 @@ type ToStepsResult = Required<Pick<NixeryWorkflow, 'steps' | 'dependencies'>> &
   Pick<NixeryWorkflow, 'clone'>;
 
 /**
- * Translate a job's `steps` into tangled steps and the workflow configuration
- * implied by its `uses` steps.
+ * Adds the steps from a GitHub job to a result.
  */
-function toSteps(steps: readonly GitHubStep[]): ToStepsResult {
-  const result: ToStepsResult = { steps: [], dependencies: {} };
-
+function addSteps(
+  result: ToStepsResult,
+  steps: readonly GitHubStep[],
+  jobId?: string,
+): void {
   for (const step of steps) {
     if (typeof step.uses === 'string') {
       const conversion = convertAction(step.uses, step);
@@ -244,33 +253,57 @@ function toSteps(steps: readonly GitHubStep[]): ToStepsResult {
       continue;
     }
 
-    result.steps.push(toStep(step));
+    result.steps.push(toStep(step, jobId));
   }
-
-  return result;
 }
 
 /**
- * Translate a single GitHub job into a tangled workflow, carrying the
- * workflow-level `shared` configuration onto it. Each job runs on its own
- * runner in GitHub, so it becomes an independent workflow in the pipeline.
+ * A comparable key for a job's `runs-on`, so jobs combined into one workflow can
+ * be checked for running on the same runner.
+ */
+function runnerKey(job: NormalJob): string {
+  return JSON.stringify(job['runs-on'] ?? null);
+}
+
+/**
+ * Translate a group of GitHub jobs into a single tangled workflow.
+ * A group is one or more jobs linked by `needs`. Their steps run in dependency
+ * order on one runner, so they must agree on `runs-on`.
  */
 function toWorkflow(
-  id: string,
-  job: NormalJob,
+  group: JobGroup,
+  jobs: Record<string, NormalJob>,
   shared: WorkflowBase,
 ): Workflow {
-  if ('uses' in job) {
-    throw new Error(
-      `Unsupported job "${id}": reusable workflow calls have no tangled equivalent`,
-    );
+  const combined = group.ids.length > 1;
+  const result: ToStepsResult = { steps: [], dependencies: {} };
+  let runner: string | undefined;
+
+  for (const id of group.ids) {
+    const job = jobs[id]!;
+
+    if ('uses' in job) {
+      throw new Error(
+        `Unsupported job "${id}": reusable workflow calls have no tangled equivalent`,
+      );
+    }
+
+    assertKnownKeys(job, JOB_KEYS, `job "${id}"`);
+    assertPermissions(job.permissions, `job "${id}"`);
+
+    const key = runnerKey(job);
+    if (runner === undefined) {
+      runner = key;
+    } else if (key !== runner) {
+      throw new Error(
+        `Jobs linked by \`needs\` run on different runners and cannot be combined: ${group.ids.join(', ')}`,
+      );
+    }
+
+    addSteps(result, job.steps ?? [], combined ? id : undefined);
   }
 
-  assertKnownKeys(job, JOB_KEYS, `job "${id}"`);
-  assertPermissions(job.permissions, `job "${id}"`);
-
-  const { steps, dependencies, clone } = toSteps(job.steps ?? []);
-
+  const { steps, dependencies, clone } = result;
   const workflow: NixeryWorkflow = { engine: 'nixery' };
 
   if (shared.when) {
@@ -293,9 +326,10 @@ function toWorkflow(
 }
 
 /**
- * Convert a GitHub Actions workflow into an equivalent tangled pipeline, one
- * workflow per GitHub job. Throws on any workflow, job, or step configuration
- * that has no tangled representation, rather than silently dropping it.
+ * Convert a GitHub Actions workflow into an equivalent tangled pipeline. Jobs
+ * linked by `needs` collapse into a single workflow whose steps run in
+ * dependency order.
+ * Throws on any workflow, job, or step configuration that cannot be converted.
  */
 export function convertWorkflow(workflow: GitHubWorkflow): Pipeline {
   assertKnownKeys(workflow, WORKFLOW_KEYS, 'workflow');
@@ -313,7 +347,7 @@ export function convertWorkflow(workflow: GitHubWorkflow): Pipeline {
     shared.environment = environment;
   }
 
-  return Object.entries(workflow.jobs).map(([id, job]) =>
-    toWorkflow(id, job as NormalJob, shared),
-  );
+  const jobs = workflow.jobs as Record<string, NormalJob>;
+
+  return groupJobsByNeeds(jobs).map((group) => toWorkflow(group, jobs, shared));
 }
